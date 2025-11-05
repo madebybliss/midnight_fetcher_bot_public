@@ -6,6 +6,8 @@ Windows-based NextJS application for user-friendly Midnight mining. Generate wal
 
 When the app starts, it can keep around 10 minutes for things to fully get going. As the registration of addresses can take quite some time as they are registering in the API that has rate limiting, luckily this is a one time thing.
 
+Also note this was built very quickly and possibly has many bugs. 
+
 WE TAKE ZEROOO RESPONSIBILITY FOR THIS SO USE IT AT YOUR OWN RISK.
 
 ## Features
