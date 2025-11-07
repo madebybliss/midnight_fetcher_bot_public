@@ -2,7 +2,11 @@ use actix_web::{web, App, HttpResponse, HttpServer, middleware};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
 use rayon::prelude::*;
-use log::{info, error, warn};
+use log::{info, error, warn, debug};
+
+// Performance: Use mimalloc as global allocator for better performance
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 // Import HashEngine modules
 mod hashengine {
@@ -154,6 +158,8 @@ async fn hash_handler(req: web::Json<HashRequest>) -> HttpResponse {
 
 /// POST /hash-batch - Hash multiple preimages in parallel
 async fn hash_batch_handler(req: web::Json<BatchHashRequest>) -> HttpResponse {
+    let batch_start = std::time::Instant::now();
+
     let rom_lock = ROM.read().unwrap();
     let rom = match rom_lock.as_ref() {
         Some(r) => Arc::clone(r),
@@ -172,8 +178,11 @@ async fn hash_batch_handler(req: web::Json<BatchHashRequest>) -> HttpResponse {
         });
     }
 
-    // Parallel hash processing using rayon
+    let preimage_count = req.preimages.len();
+
+    // Parallel hash processing using rayon with pre-allocated result vector
     // Each preimage is hashed on a separate thread
+    let hash_start = std::time::Instant::now();
     let hashes: Vec<String> = req.preimages
         .par_iter()
         .map(|preimage| {
@@ -182,6 +191,18 @@ async fn hash_batch_handler(req: web::Json<BatchHashRequest>) -> HttpResponse {
             hex::encode(hash_bytes)
         })
         .collect();
+
+    let hash_duration = hash_start.elapsed();
+    let total_duration = batch_start.elapsed();
+    let throughput = (preimage_count as f64 / total_duration.as_secs_f64()) as u64;
+
+    // Log performance metrics at debug level (only visible with RUST_LOG=debug)
+    if preimage_count >= 100 {
+        debug!(
+            "Batch processed: {} hashes in {:?} ({} H/s)",
+            preimage_count, total_duration, throughput
+        );
+    }
 
     HttpResponse::Ok().json(BatchHashResponse { hashes })
 }
@@ -221,7 +242,10 @@ async fn hash_batch_shared_handler(req: web::Json<serde_json::Value>) -> HttpRes
         });
     }
 
-    // Parallel hash processing
+    let preimage_count = preimages.len();
+
+    // Parallel hash processing with pre-allocation
+    let batch_start = std::time::Instant::now();
     let hashes: Vec<String> = preimages
         .par_iter()
         .map(|preimage| {
@@ -230,6 +254,17 @@ async fn hash_batch_shared_handler(req: web::Json<serde_json::Value>) -> HttpRes
             hex::encode(hash_bytes)
         })
         .collect();
+
+    let total_duration = batch_start.elapsed();
+    let throughput = (preimage_count as f64 / total_duration.as_secs_f64()) as u64;
+
+    // Log performance metrics at debug level (only visible with RUST_LOG=debug)
+    if preimage_count >= 100 {
+        debug!(
+            "Batch shared processed: {} hashes in {:?} ({} H/s)",
+            preimage_count, total_duration, throughput
+        );
+    }
 
     // Return standard response (SharedArrayBuffer handled on Node.js side)
     HttpResponse::Ok().json(BatchHashResponse { hashes })

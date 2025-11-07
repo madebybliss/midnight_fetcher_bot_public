@@ -1,0 +1,124 @@
+{
+  "timestamp": "2025-11-07T22:12:32.050Z",
+  "startTime": 1762553551353,
+  "romInitTime": 8,
+  "singleHash": {
+    "avg": 1.1,
+    "min": 1,
+    "max": 2,
+    "hashesPerSecond": 909.090909090909
+  },
+  "batches": [
+    {
+      "batchSize": 1,
+      "avg": 1,
+      "min": 1,
+      "max": 1,
+      "median": 1,
+      "hashesPerSecond": 1000,
+      "timings": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "batchSize": 10,
+      "avg": 1.2,
+      "min": 1,
+      "max": 2,
+      "median": 1,
+      "hashesPerSecond": 8333.333333333334,
+      "timings": [
+        1,
+        1,
+        1,
+        1,
+        2
+      ]
+    },
+    {
+      "batchSize": 50,
+      "avg": 6,
+      "min": 2,
+      "max": 19,
+      "median": 3,
+      "hashesPerSecond": 8333.333333333334,
+      "timings": [
+        2,
+        3,
+        3,
+        3,
+        19
+      ]
+    },
+    {
+      "batchSize": 100,
+      "avg": 12.6,
+      "min": 4,
+      "max": 44,
+      "median": 5,
+      "hashesPerSecond": 7936.507936507936,
+      "timings": [
+        4,
+        5,
+        5,
+        5,
+        44
+      ]
+    },
+    {
+      "batchSize": 200,
+      "avg": 22.6,
+      "min": 8,
+      "max": 81,
+      "median": 8,
+      "hashesPerSecond": 8849.557522123894,
+      "timings": [
+        8,
+        8,
+        8,
+        8,
+        81
+      ]
+    },
+    {
+      "batchSize": 500,
+      "avg": 46.2,
+      "min": 17,
+      "max": 157,
+      "median": 19,
+      "hashesPerSecond": 10822.510822510822,
+      "timings": [
+        17,
+        19,
+        19,
+        19,
+        157
+      ]
+    },
+    {
+      "batchSize": 1000,
+      "avg": 42.2,
+      "min": 35,
+      "max": 69,
+      "median": 36,
+      "hashesPerSecond": 23696.682464454974,
+      "timings": [
+        35,
+        35,
+        36,
+        36,
+        69
+      ]
+    }
+  ],
+  "systemInfo": {
+    "platform": "win32",
+    "arch": "x64",
+    "nodeVersion": "v20.19.3",
+    "cpus": 24
+  }
+}
