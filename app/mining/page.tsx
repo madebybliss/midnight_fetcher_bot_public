@@ -577,10 +577,8 @@ function MiningDashboardContent() {
   // Load history when switching to history tab and auto-refresh every 30 seconds
   useEffect(() => {
     if (activeTab === 'history') {
-      // Initial fetch
-      if (!history) {
-        fetchHistory();
-      }
+      // Always fetch when switching to history tab
+      fetchHistory();
 
       // Set up auto-refresh interval
       const intervalId = setInterval(() => {
@@ -594,28 +592,28 @@ function MiningDashboardContent() {
 
   // Load rewards when switching to rewards tab
   useEffect(() => {
-    if (activeTab === 'rewards' && !rewardsData) {
+    if (activeTab === 'rewards') {
       fetchRewards();
     }
   }, [activeTab]);
 
   // Load addresses when switching to addresses tab
   useEffect(() => {
-    if (activeTab === 'addresses' && !addressesData) {
+    if (activeTab === 'addresses') {
       fetchAddresses();
     }
   }, [activeTab]);
 
   // Load scale data when switching to scale tab
   useEffect(() => {
-    if (activeTab === 'scale' && !scaleSpecs) {
+    if (activeTab === 'scale') {
       fetchScaleData();
     }
   }, [activeTab]);
 
   // Load dev fee status when switching to devfee tab
   useEffect(() => {
-    if (activeTab === 'devfee' && !devFeeData) {
+    if (activeTab === 'devfee') {
       fetchDevFeeStatus();
     }
   }, [activeTab]);
