@@ -747,7 +747,7 @@ class MiningOrchestrator extends EventEmitter {
 
     // Calculate available workers (use all workers - no permanent reservation)
     const availableWorkers = this.workerThreads;
-    const MAX_SUBMISSION_FAILURES = 6;
+    const MAX_SUBMISSION_FAILURES = 1; // Reduced from 6: "already exists" means another worker succeeded, no point retrying
 
     // Mine in batches: continuously mine groups of addresses until challenge changes
     // After each batch, check if dev fee is needed
@@ -1177,7 +1177,7 @@ class MiningOrchestrator extends EventEmitter {
       const pauseKey = `${addr.bech32}:${challengeId}`;
       if (this.pausedAddresses.has(pauseKey)) {
         // Wait a bit and check again
-        await this.sleep(20);
+        await this.sleep(100); // Reverted from 20ms to 100ms to reduce race conditions
         continue;
       }
 
@@ -1598,7 +1598,7 @@ class MiningOrchestrator extends EventEmitter {
 
       console.log(`[Orchestrator] ${logPrefix} Making POST request...`);
       const response = await axios.post(submitUrl, {}, {
-        timeout: 30000, // 30 second timeout
+        timeout: 60000, // 60 second timeout (increased from 30s to handle slow servers)
         validateStatus: (status) => status < 500, // Don't throw on 4xx errors
       });
 
@@ -1689,8 +1689,42 @@ class MiningOrchestrator extends EventEmitter {
         isTimeout: error.code === 'ECONNABORTED',
       });
 
-      // Check if error is due to address not being registered
+      // Check error type
       const errorMessage = error.response?.data?.message || error.response?.data?.error || error.message || '';
+
+      // Check if error is "solution already exists" - this means another worker succeeded!
+      const isSolutionAlreadyExists =
+        errorMessage.toLowerCase().includes('already exists') ||
+        errorMessage.toLowerCase().includes('solution already') ||
+        (error.response?.status === 400 && errorMessage.toLowerCase().includes('duplicate'));
+
+      if (isSolutionAlreadyExists) {
+        console.log('[Orchestrator] ℹ️  Solution already exists - another worker succeeded for this address+challenge');
+        console.log('[Orchestrator] ✓ Treating as success to prevent further duplicate attempts');
+
+        // Mark as solved to stop other workers
+        if (!this.solvedAddressChallenges.has(addr.bech32)) {
+          this.solvedAddressChallenges.set(addr.bech32, new Set());
+        }
+        this.solvedAddressChallenges.get(addr.bech32)!.add(challengeId);
+
+        // Log it as an error for user visibility, but don't throw
+        receiptsLogger.logError({
+          ts: new Date().toISOString(),
+          address: addr.bech32,
+          addressIndex: addr.index,
+          challenge_id: challengeId,
+          nonce: nonce,
+          hash: hash,
+          error: `Duplicate submission - solution already exists (another worker succeeded)`,
+          response: error.response?.data,
+        });
+
+        // Return successfully (don't throw) - address is solved
+        return;
+      }
+
+      // Check if error is due to address not being registered
       const isNotRegisteredError =
         errorMessage.toLowerCase().includes('not registered') ||
         errorMessage.toLowerCase().includes('unregistered') ||
@@ -1738,7 +1772,31 @@ class MiningOrchestrator extends EventEmitter {
         }
       }
 
-      // Log error to file (for non-registration errors or failed retry)
+      // Check if this is a timeout error
+      const isTimeout = error.code === 'ECONNABORTED' || error.message.toLowerCase().includes('timeout');
+
+      if (isTimeout) {
+        console.warn('[Orchestrator] ⚠️  Submission timed out - server may have accepted it but response didn\'t reach us');
+        console.warn('[Orchestrator] This is an uncertain state - the solution might be accepted on the server');
+        console.warn('[Orchestrator] NOT marking as solved to allow potential retry, but logging for visibility');
+
+        // Log the timeout
+        receiptsLogger.logError({
+          ts: new Date().toISOString(),
+          address: addr.bech32,
+          addressIndex: addr.index,
+          challenge_id: challengeId,
+          nonce: nonce,
+          hash: hash,
+          error: `Submission timeout after 60s - uncertain state (may have been accepted by server)`,
+          response: { timeout: true, duration: '60s' },
+        });
+
+        // Re-throw to trigger retry logic (with MAX_SUBMISSION_FAILURES = 1, we'll try once more with different nonce)
+        throw error;
+      }
+
+      // Log error to file (for non-registration, non-timeout errors)
       receiptsLogger.logError({
         ts: new Date().toISOString(),
         address: addr.bech32,
@@ -1906,7 +1964,9 @@ class MiningOrchestrator extends EventEmitter {
    * Fetch current challenge from API
    */
   private async fetchChallenge(): Promise<ChallengeResponse> {
-    const response = await axios.get(`${this.apiBase}/challenge`);
+    const response = await axios.get(`${this.apiBase}/challenge`, {
+      timeout: 30000, // 30 second timeout for challenge fetch
+    });
     return response.data;
   }
 
@@ -1982,7 +2042,9 @@ class MiningOrchestrator extends EventEmitter {
     }
 
     // Get T&C message
-    const tandcResp = await axios.get(`${this.apiBase}/TandC`);
+    const tandcResp = await axios.get(`${this.apiBase}/TandC`, {
+      timeout: 30000, // 30 second timeout
+    });
     const message = tandcResp.data.message;
 
     // Sign message
@@ -1990,7 +2052,9 @@ class MiningOrchestrator extends EventEmitter {
 
     // Register
     const registerUrl = `${this.apiBase}/register/${addr.bech32}/${signature}/${addr.publicKeyHex}`;
-    await axios.post(registerUrl, {});
+    await axios.post(registerUrl, {}, {
+      timeout: 30000, // 30 second timeout
+    });
 
     // Mark as registered
     this.walletManager.markAddressRegistered(addr.index);

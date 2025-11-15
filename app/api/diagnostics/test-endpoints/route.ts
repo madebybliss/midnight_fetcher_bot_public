@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
       'GET',
       `${API_BASE}/challenge`,
       async () => {
-        const response = await axios.get(`${API_BASE}/challenge`, { timeout: 10000 });
+        const response = await axios.get(`${API_BASE}/challenge`, { timeout: 30000 });
         return response;
       }
     );
@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
       'GET',
       `${API_BASE}/TandC`,
       async () => {
-        const response = await axios.get(`${API_BASE}/TandC`, { timeout: 10000 });
+        const response = await axios.get(`${API_BASE}/TandC`, { timeout: 30000 });
         return response;
       }
     );
@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
         `${API_BASE}/register/{address}/{signature}/{publicKey}`,
         async () => {
           // Get T&C message
-          const tandcResp = await axios.get(`${API_BASE}/TandC`, { timeout: 10000 });
+          const tandcResp = await axios.get(`${API_BASE}/TandC`, { timeout: 30000 });
           const message = tandcResp.data.message;
 
           // Sign message
@@ -81,7 +81,7 @@ export async function POST(request: NextRequest) {
           // Attempt registration
           const registerUrl = `${API_BASE}/register/${testAddress.bech32}/${signature}/${testAddress.publicKeyHex}`;
           const response = await axios.post(registerUrl, {}, {
-            timeout: 10000,
+            timeout: 30000,
             validateStatus: (status) => status < 500 // Allow 4xx errors (e.g., already registered)
           });
 
@@ -102,7 +102,7 @@ export async function POST(request: NextRequest) {
 
           const submitUrl = `${API_BASE}/solution/${testAddress.bech32}/${challengeId}/${mockNonce}`;
           const response = await axios.post(submitUrl, {}, {
-            timeout: 10000,
+            timeout: 30000,
             validateStatus: (status) => status < 600 // Accept any status to see the error
           });
 

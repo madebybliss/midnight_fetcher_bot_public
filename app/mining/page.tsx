@@ -125,6 +125,10 @@ function MiningDashboardContent() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [failureModalOpen, setFailureModalOpen] = useState(false);
   const [selectedAddressHistory, setSelectedAddressHistory] = useState<AddressHistory | null>(null);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [retryError, setRetryError] = useState<{ id: string; message: string } | null>(null);
+  const [retrySuccess, setRetrySuccess] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   // Workers state
   const [workers, setWorkers] = useState<Map<number, WorkerStats>>(new Map());
@@ -1038,6 +1042,70 @@ function MiningDashboardContent() {
     return `${hours}h ${minutes % 60}m ago`;
   };
 
+  const isWithin24Hours = (timestamp: string): boolean => {
+    const errorTime = new Date(timestamp).getTime();
+    const now = Date.now();
+    const hoursSinceError = (now - errorTime) / (1000 * 60 * 60);
+    return hoursSinceError <= 24;
+  };
+
+  const retrySolution = async (address: string, challengeId: string, nonce: string, entryId: string) => {
+    setRetryingId(entryId);
+    setRetryError(null);
+    setRetrySuccess(null);
+
+    try {
+      const response = await fetch('/api/mining/retry', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          address,
+          challengeId,
+          nonce,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        // Show detailed error message
+        const errorMessage = data.details
+          ? `${data.error}: ${JSON.stringify(data.details, null, 2)}`
+          : data.message || data.error || 'Failed to retry solution';
+
+        setRetryError({ id: entryId, message: errorMessage });
+        setToastMessage({ message: `Retry failed: ${data.error || 'Unknown error'}`, type: 'error' });
+        setTimeout(() => {
+          setRetryError(null);
+          setToastMessage(null);
+        }, 5000);
+      } else {
+        setRetrySuccess(entryId);
+        setToastMessage({ message: '✓ Solution retried successfully!', type: 'success' });
+        setTimeout(() => {
+          setRetrySuccess(null);
+          setToastMessage(null);
+        }, 3000);
+        // Refresh history to show the new successful submission
+        await fetchHistory();
+      }
+    } catch (err: any) {
+      setRetryError({
+        id: entryId,
+        message: `Network error: ${err.message}`
+      });
+      setToastMessage({ message: `Network error: ${err.message}`, type: 'error' });
+      setTimeout(() => {
+        setRetryError(null);
+        setToastMessage(null);
+      }, 5000);
+    } finally {
+      setRetryingId(null);
+    }
+  };
+
   // Load history when switching to dashboard or history tab and auto-refresh every 30 seconds
   useEffect(() => {
     if (activeTab === 'dashboard' || activeTab === 'history') {
@@ -1065,6 +1133,56 @@ function MiningDashboardContent() {
   useEffect(() => {
     if (activeTab === 'addresses') {
       fetchAddresses();
+    }
+  }, [activeTab]);
+
+  // Load version info when switching to diagnostics tab
+  useEffect(() => {
+    if (activeTab === 'diagnostics') {
+      const loadVersion = async () => {
+        try {
+          const response = await fetch('/api/version?checkUpdate=true');
+          const data = await response.json();
+
+          const versionEl = document.getElementById('version-info');
+          const storageEl = document.getElementById('storage-path');
+          const secureEl = document.getElementById('secure-path');
+          const updateEl = document.getElementById('update-status');
+
+          if (data.success) {
+            if (versionEl) {
+              versionEl.textContent = `v${data.version}-${data.commit} | ${data.branch} | Built: ${new Date(data.buildDate).toLocaleString()}`;
+            }
+
+            if (storageEl) {
+              storageEl.textContent = data.storagePath;
+            }
+
+            if (secureEl) {
+              secureEl.textContent = data.securePath;
+            }
+
+            if (updateEl && data.updateCheck) {
+              if (data.updateCheck.updateAvailable) {
+                const behindText = data.updateCheck.commitsBehind > 0
+                  ? ` (${data.updateCheck.commitsBehind} commits behind)`
+                  : '';
+                updateEl.innerHTML = `<span class="text-yellow-400">⚠️ Update available${behindText}</span>`;
+                updateEl.innerHTML += `<br><span class="text-xs text-gray-400">Latest: ${data.updateCheck.latestCommit} | Your version: ${data.updateCheck.currentCommit}</span>`;
+              } else {
+                updateEl.innerHTML = `<span class="text-green-400">✓ Up to date</span>`;
+              }
+            }
+          }
+        } catch (err) {
+          console.error('Failed to fetch version:', err);
+          const versionEl = document.getElementById('version-info');
+          if (versionEl) {
+            versionEl.textContent = 'Failed to load version';
+          }
+        }
+      };
+      loadVersion();
     }
   }, [activeTab]);
 
@@ -1112,6 +1230,29 @@ function MiningDashboardContent() {
 
   return (
     <div className="relative min-h-screen p-4 md:p-8 overflow-hidden">
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed top-4 right-4 z-50 animate-in slide-in-from-top-5 duration-300">
+          <div className={cn(
+            "px-6 py-4 rounded-lg shadow-2xl border-2 flex items-center gap-3 min-w-[300px] max-w-[500px]",
+            toastMessage.type === 'success' && "bg-green-900/90 border-green-500/50 text-green-100",
+            toastMessage.type === 'error' && "bg-red-900/90 border-red-500/50 text-red-100",
+            toastMessage.type === 'info' && "bg-blue-900/90 border-blue-500/50 text-blue-100"
+          )}>
+            {toastMessage.type === 'success' && <CheckCircle2 className="w-5 h-5 flex-shrink-0" />}
+            {toastMessage.type === 'error' && <XCircle className="w-5 h-5 flex-shrink-0" />}
+            {toastMessage.type === 'info' && <Info className="w-5 h-5 flex-shrink-0" />}
+            <span className="font-medium">{toastMessage.message}</span>
+            <button
+              onClick={() => setToastMessage(null)}
+              className="ml-auto text-white/70 hover:text-white transition-colors"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Background decoration */}
       <div className="absolute inset-0 bg-gradient-to-br from-purple-900/10 via-blue-900/10 to-gray-900 pointer-events-none" />
       <div className="absolute top-20 left-20 w-96 h-96 bg-purple-500/5 rounded-full blur-3xl pointer-events-none" />
@@ -1949,6 +2090,86 @@ function MiningDashboardContent() {
                                     </div>
                                   )}
 
+                                  {/* Retry button for failed solutions (if within 24 hours) */}
+                                  {addressHistory.status === 'failed' && addressHistory.failures.length > 0 && (() => {
+                                    const latestFailure = addressHistory.failures[addressHistory.failures.length - 1];
+                                    const failureTime = new Date(latestFailure.ts).getTime();
+                                    const now = Date.now();
+                                    const hoursSince = (now - failureTime) / (1000 * 60 * 60);
+                                    const within24Hours = hoursSince <= 24;
+                                    const retryId = `retry-main-${addressHistory.addressIndex}-${addressHistory.challengeId}`;
+
+                                    return within24Hours ? (
+                                      <Button
+                                        onClick={async (e) => {
+                                          e.stopPropagation();
+                                          setRetryingId(retryId);
+                                          setRetryError(null);
+                                          setRetrySuccess(null);
+
+                                          try {
+                                            const response = await fetch('/api/mining/retry', {
+                                              method: 'POST',
+                                              headers: { 'Content-Type': 'application/json' },
+                                              body: JSON.stringify({
+                                                address: addressHistory.address,
+                                                challengeId: addressHistory.challengeId,
+                                                nonce: latestFailure.nonce,
+                                              }),
+                                            });
+
+                                            const data = await response.json();
+
+                                            if (!response.ok) {
+                                              const errorMessage = data.details
+                                                ? `${data.error}: ${JSON.stringify(data.details, null, 2)}`
+                                                : data.message || data.error || 'Failed to retry solution';
+                                              setRetryError({ id: retryId, message: errorMessage });
+                                              setToastMessage({ message: `Retry failed: ${data.error || 'Unknown error'}`, type: 'error' });
+                                              setTimeout(() => {
+                                                setRetryError(null);
+                                                setToastMessage(null);
+                                              }, 5000);
+                                            } else {
+                                              setRetrySuccess(retryId);
+                                              setToastMessage({ message: '✓ Solution retried successfully!', type: 'success' });
+                                              setTimeout(() => {
+                                                setRetrySuccess(null);
+                                                setToastMessage(null);
+                                              }, 3000);
+                                              await fetchHistory();
+                                            }
+                                          } catch (err: any) {
+                                            setRetryError({ id: retryId, message: `Network error: ${err.message}` });
+                                            setToastMessage({ message: `Network error: ${err.message}`, type: 'error' });
+                                            setTimeout(() => {
+                                              setRetryError(null);
+                                              setToastMessage(null);
+                                            }, 5000);
+                                          } finally {
+                                            setRetryingId(null);
+                                          }
+                                        }}
+                                        disabled={retryingId === retryId}
+                                        size="sm"
+                                        variant="outline"
+                                        className="gap-1"
+                                      >
+                                        {retryingId === retryId ? (
+                                          <>
+                                            <Loader2 className="w-3 h-3 animate-spin" />
+                                            Retrying...
+                                          </>
+                                        ) : (
+                                          <>
+                                            <RefreshCw className="w-3 h-3" />
+                                            Retry
+                                          </>
+                                        )}
+                                      </Button>
+                                    ) : null;
+                                  })()}
+
                                   {addressHistory.failureCount > 0 && (
                                     <button
                                       onClick={(e) => {
@@ -2002,23 +2223,74 @@ function MiningDashboardContent() {
                       <div>
                         <h3 className="text-lg font-semibold text-white mb-3">Failure Log</h3>
                         <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                          {selectedAddressHistory.failures.map((failure, idx) => (
-                            <div key={idx} className="p-3 bg-red-900/10 border border-red-700/50 rounded-lg">
-                              <div className="flex items-start justify-between gap-4 mb-2">
-                                <span className="text-xs text-gray-400">{formatDate(failure.ts)}</span>
-                                <span className="text-xs text-gray-500 font-mono">Nonce: {failure.nonce}</span>
-                              </div>
-                              <div className="text-sm text-red-300">
-                                <span className="text-red-400 font-semibold">Error: </span>
-                                {failure.error}
-                              </div>
-                              {failure.hash && (
-                                <div className="text-xs text-gray-500 font-mono mt-1">
-                                  Hash: {failure.hash}
+                          {selectedAddressHistory.failures.map((failure, idx) => {
+                            const failureId = `failure-${selectedAddressHistory.addressIndex}-${idx}`;
+                            return (
+                              <div key={idx} className="p-3 bg-red-900/10 border border-red-700/50 rounded-lg">
+                                <div className="flex items-start justify-between gap-4 mb-2">
+                                  <span className="text-xs text-gray-400">{formatDate(failure.ts)}</span>
+                                  <span className="text-xs text-gray-500 font-mono">Nonce: {failure.nonce}</span>
                                 </div>
-                              )}
-                            </div>
-                          ))}
+                                <div className="text-sm text-red-300">
+                                  <span className="text-red-400 font-semibold">Error: </span>
+                                  {failure.error}
+                                </div>
+                                {failure.hash && (
+                                  <div className="text-xs text-gray-500 font-mono mt-1">
+                                    Hash: {failure.hash}
+                                  </div>
+                                )}
+
+                                {/* Retry Button */}
+                                {isWithin24Hours(failure.ts) && (
+                                  <div className="mt-2">
+                                    <Button
+                                      onClick={() => retrySolution(
+                                        selectedAddressHistory.address,
+                                        selectedAddressHistory.challengeId,
+                                        failure.nonce,
+                                        failureId
+                                      )}
+                                      disabled={retryingId === failureId}
+                                      size="sm"
+                                      variant="outline"
+                                      className="text-xs"
+                                    >
+                                      {retryingId === failureId ? (
+                                        <>
+                                          <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                          Retrying...
+                                        </>
+                                      ) : (
+                                        <>
+                                          <RefreshCw className="w-3 h-3 mr-1" />
+                                          Retry Solution
+                                        </>
+                                      )}
+                                    </Button>
+                                  </div>
+                                )}
+
+                                {/* Retry Success Message */}
+                                {retrySuccess === failureId && (
+                                  <div className="mt-2 p-2 bg-green-900/20 rounded text-xs">
+                                    <span className="text-green-400 font-semibold">✓ </span>
+                                    <span className="text-green-300">Solution retried successfully!</span>
+                                  </div>
+                                )}
+
+                                {/* Retry Error Message */}
+                                {retryError?.id === failureId && (
+                                  <div className="mt-2 p-2 bg-red-900/30 rounded text-xs">
+                                    <span className="text-red-400 font-semibold">Retry Failed: </span>
+                                    <pre className="text-red-300 mt-1 whitespace-pre-wrap break-all text-xs">
+                                      {retryError.message}
+                                    </pre>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     </div>
@@ -3870,6 +4142,74 @@ function MiningDashboardContent() {
         {/* Diagnostics Tab */}
         {activeTab === 'diagnostics' && (
           <div className="space-y-6">
+            {/* Version & System Info Card */}
+            <Card variant="bordered" className="bg-gradient-to-br from-gray-900/40 to-gray-800/20">
+              <CardContent className="p-4">
+                <div className="space-y-4">
+                  {/* Version Info */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <Info className="w-5 h-5 text-blue-400" />
+                      <div>
+                        <p className="text-sm font-semibold text-white">Application Version</p>
+                        <p className="text-xs text-gray-400" id="version-info">Loading...</p>
+                        <p className="text-xs mt-1" id="update-status"></p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        const loadVersion = async () => {
+                          try {
+                            const response = await fetch('/api/version?checkUpdate=true');
+                            const data = await response.json();
+                            const versionEl = document.getElementById('version-info');
+                            const storageEl = document.getElementById('storage-path');
+                            const secureEl = document.getElementById('secure-path');
+                            const updateEl = document.getElementById('update-status');
+                            if (data.success) {
+                              if (versionEl) versionEl.textContent = `v${data.version}-${data.commit} | ${data.branch} | Built: ${new Date(data.buildDate).toLocaleString()}`;
+                              if (storageEl) storageEl.textContent = data.storagePath;
+                              if (secureEl) secureEl.textContent = data.securePath;
+                              if (updateEl && data.updateCheck) {
+                                if (data.updateCheck.updateAvailable) {
+                                  const behindText = data.updateCheck.commitsBehind > 0 ? ` (${data.updateCheck.commitsBehind} commits behind)` : '';
+                                  updateEl.innerHTML = `<span class="text-yellow-400">⚠️ Update available${behindText}</span><br><span class="text-xs text-gray-400">Latest: ${data.updateCheck.latestCommit} | Your version: ${data.updateCheck.currentCommit}</span>`;
+                                } else {
+                                  updateEl.innerHTML = `<span class="text-green-400">✓ Up to date</span>`;
+                                }
+                              }
+                            }
+                          } catch (err) {
+                            console.error('Failed to fetch version:', err);
+                          }
+                        };
+                        await loadVersion();
+                      }}
+                      className="text-xs px-3 py-1 bg-blue-900/30 hover:bg-blue-900/50 text-blue-400 rounded transition-colors"
+                    >
+                      <RefreshCw className="w-3 h-3 inline mr-1" />
+                      Refresh
+                    </button>
+                  </div>
+
+                  {/* Storage Locations */}
+                  <div className="border-t border-gray-700 pt-3 space-y-2">
+                    <div>
+                      <p className="text-xs text-gray-400 mb-1">Storage Location (receipts, errors):</p>
+                      <p className="text-xs font-mono text-white bg-black/30 p-2 rounded" id="storage-path">Loading...</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-400 mb-1">Secure Location (wallet, dev fee cache):</p>
+                      <p className="text-xs font-mono text-white bg-black/30 p-2 rounded" id="secure-path">Loading...</p>
+                    </div>
+                    <p className="text-xs text-gray-500 italic">
+                      💡 Old users: Files may be in installation folder. New users: Files in Documents/MidnightFetcherBot
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
             <Card variant="bordered">
               <CardHeader>
                 <CardTitle className="text-2xl flex items-center gap-2">

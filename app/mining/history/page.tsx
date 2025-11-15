@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { StatCard } from '@/components/ui/stat-card';
 import { Alert } from '@/components/ui/alert';
-import { ArrowLeft, CheckCircle2, XCircle, Calendar, TrendingUp, Loader2, Copy, Check } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, XCircle, Calendar, TrendingUp, Loader2, Copy, Check, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface CryptoReceipt {
@@ -51,6 +51,9 @@ export default function MiningHistory() {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<'all' | 'success' | 'error'>('all');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [retryError, setRetryError] = useState<{ id: string; message: string } | null>(null);
+  const [retrySuccess, setRetrySuccess] = useState<string | null>(null);
 
   useEffect(() => {
     fetchHistory();
@@ -81,6 +84,58 @@ export default function MiningHistory() {
       setTimeout(() => setCopiedId(null), 2000);
     } catch (err) {
       console.error('Failed to copy:', err);
+    }
+  };
+
+  const isWithin24Hours = (timestamp: string): boolean => {
+    const errorTime = new Date(timestamp).getTime();
+    const now = Date.now();
+    const hoursSinceError = (now - errorTime) / (1000 * 60 * 60);
+    return hoursSinceError <= 24;
+  };
+
+  const retrySolution = async (errorEntry: ErrorEntry, entryId: string) => {
+    setRetryingId(entryId);
+    setRetryError(null);
+    setRetrySuccess(null);
+
+    try {
+      const response = await fetch('/api/mining/retry', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          address: errorEntry.address,
+          challengeId: errorEntry.challenge_id,
+          nonce: errorEntry.nonce,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        // Show detailed error message
+        const errorMessage = data.details
+          ? `${data.error}: ${JSON.stringify(data.details, null, 2)}`
+          : data.message || data.error || 'Failed to retry solution';
+
+        setRetryError({ id: entryId, message: errorMessage });
+        setTimeout(() => setRetryError(null), 10000); // Clear after 10 seconds
+      } else {
+        setRetrySuccess(entryId);
+        setTimeout(() => setRetrySuccess(null), 5000);
+        // Refresh history to show the new successful submission
+        await fetchHistory();
+      }
+    } catch (err: any) {
+      setRetryError({
+        id: entryId,
+        message: `Network error: ${err.message}`
+      });
+      setTimeout(() => setRetryError(null), 10000);
+    } finally {
+      setRetryingId(null);
     }
   };
 
@@ -305,10 +360,55 @@ export default function MiningHistory() {
                         </div>
 
                         {entry.type === 'error' && (
-                          <div className="mt-2 p-2 bg-red-900/20 rounded text-xs">
-                            <span className="text-red-400 font-semibold">Error: </span>
-                            <span className="text-red-300">{(entry.data as ErrorEntry).error}</span>
-                          </div>
+                          <>
+                            <div className="mt-2 p-2 bg-red-900/20 rounded text-xs">
+                              <span className="text-red-400 font-semibold">Error: </span>
+                              <span className="text-red-300">{(entry.data as ErrorEntry).error}</span>
+                            </div>
+
+                            {/* Retry Button */}
+                            {isWithin24Hours(entry.data.ts) && (
+                              <div className="mt-2">
+                                <Button
+                                  onClick={() => retrySolution(entry.data as ErrorEntry, `error-${index}`)}
+                                  disabled={retryingId === `error-${index}`}
+                                  size="sm"
+                                  variant="outline"
+                                  className="text-xs"
+                                >
+                                  {retryingId === `error-${index}` ? (
+                                    <>
+                                      <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                      Retrying...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <RefreshCw className="w-3 h-3 mr-1" />
+                                      Retry Solution
+                                    </>
+                                  )}
+                                </Button>
+                              </div>
+                            )}
+
+                            {/* Retry Success Message */}
+                            {retrySuccess === `error-${index}` && (
+                              <div className="mt-2 p-2 bg-green-900/20 rounded text-xs">
+                                <span className="text-green-400 font-semibold">✓ </span>
+                                <span className="text-green-300">Solution retried successfully!</span>
+                              </div>
+                            )}
+
+                            {/* Retry Error Message */}
+                            {retryError?.id === `error-${index}` && (
+                              <div className="mt-2 p-2 bg-red-900/30 rounded text-xs">
+                                <span className="text-red-400 font-semibold">Retry Failed: </span>
+                                <pre className="text-red-300 mt-1 whitespace-pre-wrap break-all">
+                                  {retryError.message}
+                                </pre>
+                              </div>
+                            )}
+                          </>
                         )}
 
                         {entry.type === 'success' && (entry.data as ReceiptEntry).crypto_receipt && (
